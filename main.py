@@ -27,16 +27,24 @@ def recv_thread(encryption_key: bytes, socket: socket.socket) -> None:
         print(message)
     print('Recv thread stopped')
 
+common_parser = argparse.ArgumentParser(add_help=False)
+common_parser.add_argument('-z', '--password', help='shared password', type=str, required=True)
+common_parser.add_argument('-s', '--size', help='size of random number: 1024, 2048, 3072. Default: 3072', type=int, default=3072, choices=[1024, 2048, 3072])
+
 parser = argparse.ArgumentParser(description='SPAKE protol communication with ChaCha20-Poly1305 encryption')
-parser.add_argument('-l', '--listen', help='listen mode(aka server)', action="store_true")
-parser.add_argument('-H', '--host', help='host to listen/connect to', type=str, required=True)
-parser.add_argument('-p', '--port', help='port to listen on or connect to', type=int, required=True)
-parser.add_argument('-z', '--password', help='shared password', type=str, required=True)
-parser.add_argument('-s', '--size', help='size of random number: 1024, 2048, 3072. Default: 3072', type=int, default=3072, choices=[1024, 2048, 3072])
+subparsers = parser.add_subparsers(dest="mode", required=True)
+
+server_parser = subparsers.add_parser('bind', parents=[common_parser], help='Run in server mode (listen)')
+server_parser.add_argument('host', nargs='?', default='127.0.0.1', help='Address to bind the server. Default: 127.0.0.1')
+server_parser.add_argument('port', nargs='?', type=int, default=8888, help='Port to bind to. Default: 8888')
+
+client_parser = subparsers.add_parser('connect', parents=[common_parser], help='Run in client mode')
+client_parser.add_argument('host', nargs='?', default='127.0.0.1', help='Host to connect to. Default: 127.0.0.1')
+client_parser.add_argument('port', nargs='?', type=int, default=8888, help='Port to connect to. Default: 8888')
 
 args = parser.parse_args()
 
-server_status = args.listen
+server_status = args.mode == "bind"
 stop_threads = threading.Event()
 HOST=args.host
 PORT=args.port

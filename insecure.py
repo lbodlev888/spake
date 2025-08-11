@@ -1,13 +1,10 @@
-from hashlib import shake_256
-import pickle
-from Crypto.Util.number import bytes_to_long, isPrime, long_to_bytes
-from random import randrange
-from base64 import b64encode as b64e
-import argparse
-import threading
-from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+from Crypto.Util.number import bytes_to_long, long_to_bytes
 from secrets import token_bytes
 import socket
+from hashlib import shake_256
+import argparse
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+import threading
 
 def send_thread(encryption_key: bytes, socket: socket.socket) -> None:
     aead = ChaCha20Poly1305(encryption_key)
@@ -30,19 +27,9 @@ def recv_thread(encryption_key: bytes, socket: socket.socket) -> None:
         print(message)
     print('Recv thread stopped')
 
-with open('model2.pkl', 'rb') as f:
-    data = pickle.load(f)
-
-p = bytes_to_long(data[0])
-g = bytes_to_long(data[1])
-q = (p-1) // 2
-
-if not isPrime(p) or not isPrime(q):
-    print('Bad safe prime\nExiting...')
-    exit(0)
-
 common_parser = argparse.ArgumentParser(add_help=False)
 common_parser.add_argument('-z', '--password', help='shared password', type=str, required=True)
+common_parser.add_argument('-s', '--size', help='size of random number: 1024, 2048, 3072. Default: 3072', type=int, default=3072, choices=[1024, 2048, 3072])
 
 parser = argparse.ArgumentParser(description='SPAKE protol communication with ChaCha20-Poly1305 encryption')
 subparsers = parser.add_subparsers(dest="mode", required=True)
@@ -61,19 +48,15 @@ server_status = args.mode == "bind"
 stop_threads = threading.Event()
 HOST=args.host
 PORT=args.port
-SHARED_PASSWORD=args.password.encode()
+SHARED_PW=args.password.encode()
+PARAMS_LEN=int(args.size/8)
 
-h = bytes_to_long(shake_256(SHARED_PASSWORD).digest(32))
-w = h % q
-s = pow(g, w, p)
-x = randrange(1, q-2)
-x_big = pow(s, x, p)
-
-#y = randrange(1, q-2)
-#y_big = pow(s, y, p)
-
-#k1 = pow(y_big, x, p)
-#k2 = pow(x_big, y, p)
+random_bytes = token_bytes(PARAMS_LEN)
+random_number = bytes_to_long(random_bytes)
+shared_pw_as_number = bytes_to_long(SHARED_PW)
+print(shared_pw_as_number)
+product = long_to_bytes(random_number * shared_pw_as_number)
+print(random_number * shared_pw_as_number)
 
 if server_status:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -84,7 +67,7 @@ if server_status:
 
     client, addr = server.accept()
     print(f'Got connection from {addr}')
-    client.send(long_to_bytes(x_big))
+    client.send(product)
 
     recv_product = bytes_to_long(client.recv(1024))
 else:
@@ -92,16 +75,14 @@ else:
         client = socket.socket()
         client.connect((HOST, PORT))
         recv_product = bytes_to_long(client.recv(1024))
-        client.send(long_to_bytes(x_big))
+        client.send(product)
     except ConnectionRefusedError:
         print('Could not connect :(')
         exit()
 
-shared_product = pow(recv_product, x, p)
-encryption_key = shake_256(long_to_bytes(shared_product)).digest(32)
-
+shared_secret = long_to_bytes(recv_product * random_number)
+encryption_key = shake_256(shared_secret).digest(32)
 print('Secure communication established')
-print(f'Using key: {b64e(encryption_key).decode()}')
 
 th_send = threading.Thread(target=send_thread, args=(encryption_key, client))
 th_recv = threading.Thread(target=recv_thread, args=(encryption_key, client))
